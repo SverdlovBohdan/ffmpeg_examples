@@ -36,5 +36,8 @@ file(MAKE_DIRECTORY ${DESTINATION})
 
 copy_resource_file(${BUNNY_FILE} ${DESTINATION})
 
-add_executable(video-app main.cc)
+add_executable(video-app main.cc
+    FfmpegSmartPtrs.cc FrameExtractorFromFile.cc)
+
 target_link_libraries(video-app 3rd-party-libs)
+target_include_directories(video-app PRIVATE ${CMAKE_SOURCE_DIR})
