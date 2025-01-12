@@ -15,29 +15,21 @@ FrameExtractorFromFile::FrameExtractorFromFile(std::filesystem::path file)
       _codec_ctx{nullptr},
       _sws_ctx{nullptr},
       _video_stream_idx{-1},
-      _packet{nullptr, [](auto*) {}} {}
+      _packet{nullptr, [](auto*) {}},
+      _original_frame_cache{nullptr, [](auto*) {}},
+      _has_more_video_frames{true} {}
 
 FrameExtractorFromFile::~FrameExtractorFromFile() {
   avcodec_free_context(&_codec_ctx);
   sws_freeContext(_sws_ctx);
+  _sws_ctx = nullptr;
   avformat_close_input(&_format_ctx);
 }
 
-AvFrameUniquePtr FrameExtractorFromFile::GetOriginalFrame() {
-  if (!IsReady() && OpenCodec()) {
-    return AvFrameUniquePtr{nullptr, [](auto*) {}};
-  }
-
-  if (!_packet) {
-    _packet = MakeAvPacketUnique();
-  }
-
-  return MakeAvFrameUnique();
-}
-
-AvFrameUniquePtr FrameExtractorFromFile::GetRgbaFrame() {
-  if (!IsReady() && OpenCodec()) {
-    return AvFrameUniquePtr{nullptr, [](auto*) {}};
+AvFrameUniquePtr FrameExtractorFromFile::GetOriginalFrame(
+    AvFrameUniquePtr pre_allocated_frame) {
+  if (!IsReady() && !OpenCodec()) {
+    return pre_allocated_frame;
   }
 
   if (!_packet) {
@@ -47,36 +39,23 @@ AvFrameUniquePtr FrameExtractorFromFile::GetRgbaFrame() {
   AVCodecParameters* codec_params =
       _format_ctx->streams[_video_stream_idx]->codecpar;
 
-  uint8_t* buffer =
-      reinterpret_cast<uint8_t*>(av_malloc(av_image_get_buffer_size(
-          AV_PIX_FMT_RGBA, codec_params->width, codec_params->height, 1)));
-  AvFrameUniquePtr rgb_frame =
-      AvFrameUniquePtr{av_frame_alloc(), [&buffer](AVFrame* ptr) {
-                         if (ptr) {
-                           av_frame_free(&ptr);
-                         }
-                         if (buffer) {
-                           av_free(buffer);
-                           buffer = nullptr;
-                         }
-                       }};
+  if (!pre_allocated_frame) {
+    pre_allocated_frame = MakeAvFrameUnique();
+  }
 
-  av_image_fill_arrays(rgb_frame->data, rgb_frame->linesize, buffer,
-                       AV_PIX_FMT_RGBA, codec_params->width,
-                       codec_params->height, 1);
-
-  AvFrameUniquePtr frame = MakeAvFrameUnique();
-
-  if (av_read_frame(_format_ctx, _packet.get()) >= 0) {
+  bool found = false;
+  while (av_read_frame(_format_ctx, _packet.get()) >= 0 && !found) {
     if (_packet->stream_index == _video_stream_idx) {
       if (avcodec_send_packet(_codec_ctx, _packet.get()) == 0) {
-        while (avcodec_receive_frame(_codec_ctx, frame.get()) == 0) {
+        while (avcodec_receive_frame(_codec_ctx, pre_allocated_frame.get()) ==
+               0) {
           std::cout << "Decoded frame: "
-                    << "Width=" << frame->width << ", Height=" << frame->height
-                    << ", Format=" << frame->format << std::endl;
-          // Convert frame to RGBA
-          sws_scale(_sws_ctx, frame->data, frame->linesize, 0,
-                    codec_params->height, rgb_frame->data, rgb_frame->linesize);
+                    << "Width=" << pre_allocated_frame->width
+                    << ", Height=" << pre_allocated_frame->height
+                    << ", Format=" << pre_allocated_frame->format << std::endl;
+          found = true;
+          av_packet_unref(_packet.get());
+          return pre_allocated_frame;
         }
       }
     }
@@ -84,7 +63,48 @@ AvFrameUniquePtr FrameExtractorFromFile::GetRgbaFrame() {
     av_packet_unref(_packet.get());
   }
 
-  return rgb_frame;
+  _has_more_video_frames = false;
+  return pre_allocated_frame;
+}
+
+AvFrameUniquePtr FrameExtractorFromFile::GetRgbaFrame(
+    AvFrameUniquePtr pre_allocated_frame) {
+  _original_frame_cache = GetOriginalFrame(std::move(_original_frame_cache));
+  if (!HasMoreVideoFrames()) {
+    return pre_allocated_frame;
+  }
+
+  AVCodecParameters* codec_params =
+      _format_ctx->streams[_video_stream_idx]->codecpar;
+
+  if (!pre_allocated_frame) {
+    uint8_t* buffer =
+        reinterpret_cast<uint8_t*>(av_malloc(av_image_get_buffer_size(
+            AV_PIX_FMT_RGBA, codec_params->width, codec_params->height, 1)));
+    pre_allocated_frame =
+        AvFrameUniquePtr{av_frame_alloc(), [buffer](AVFrame* ptr) mutable {
+                           if (ptr) {
+                             av_frame_free(&ptr);
+                           }
+                           if (buffer) {
+                             av_free(buffer);
+                             buffer = nullptr;
+                           }
+                         }};
+
+    av_image_fill_arrays(pre_allocated_frame->data,
+                         pre_allocated_frame->linesize, buffer, AV_PIX_FMT_RGBA,
+                         codec_params->width, codec_params->height, 1);
+  }
+
+  if (sws_scale(_sws_ctx, _original_frame_cache->data,
+                _original_frame_cache->linesize, 0, codec_params->height,
+                pre_allocated_frame->data,
+                pre_allocated_frame->linesize) == 0) {
+    return pre_allocated_frame;
+  }
+
+  return pre_allocated_frame;
 }
 
 bool FrameExtractorFromFile::OpenCodec() {
@@ -158,4 +178,8 @@ bool FrameExtractorFromFile::OpenCodec() {
 
 bool FrameExtractorFromFile::IsReady() const {
   return _format_ctx && _codec_ctx && _sws_ctx;
+}
+
+bool FrameExtractorFromFile::HasMoreVideoFrames() const {
+  return _has_more_video_frames;
 }

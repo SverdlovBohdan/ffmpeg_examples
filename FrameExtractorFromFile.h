@@ -14,9 +14,12 @@ class FrameExtractorFromFile : public FrameExtracting {
 
   ~FrameExtractorFromFile() override;
 
-  AvFrameUniquePtr GetOriginalFrame() override;
+  AvFrameUniquePtr GetOriginalFrame(
+      AvFrameUniquePtr pre_allocated_frame) override;
 
-  AvFrameUniquePtr GetRgbaFrame() override;
+  AvFrameUniquePtr GetRgbaFrame(AvFrameUniquePtr pre_allocated_frame) override;
+
+  bool HasMoreVideoFrames() const override;
 
  private:
   bool OpenCodec();
@@ -30,4 +33,6 @@ class FrameExtractorFromFile : public FrameExtracting {
   int _video_stream_idx;
 
   AvPacketUniquePtr _packet;
+  AvFrameUniquePtr _original_frame_cache;
+  bool _has_more_video_frames;
 };
