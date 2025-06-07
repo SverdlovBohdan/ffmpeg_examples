@@ -10,13 +10,10 @@ extern "C" {
 }
 
 FrameExtractorFromFile::FrameExtractorFromFile(std::filesystem::path file)
-    : _file{std::move(file)},
-      _format_ctx{nullptr},
-      _codec_ctx{nullptr},
-      _sws_ctx{nullptr},
-      _video_stream_idx{-1},
-      _packet{nullptr, [](auto*) {}},
-      _original_frame_cache{nullptr, [](auto*) {}},
+    : _file{std::move(file)}, _format_ctx{nullptr}, _codec_ctx{nullptr},
+      _sws_ctx{nullptr}, _video_stream_idx{-1},
+      _packet{MakeAvPacketUnique(nullptr)},
+      _original_frame_cache{MakeAvFrameUnique(nullptr)},
       _has_more_video_frames{true} {}
 
 FrameExtractorFromFile::~FrameExtractorFromFile() {
@@ -78,23 +75,19 @@ AvFrameUniquePtr FrameExtractorFromFile::GetRgbaFrame(
       _format_ctx->streams[_video_stream_idx]->codecpar;
 
   if (!pre_allocated_frame) {
-    uint8_t* buffer =
-        reinterpret_cast<uint8_t*>(av_malloc(av_image_get_buffer_size(
-            AV_PIX_FMT_RGBA, codec_params->width, codec_params->height, 1)));
-    pre_allocated_frame =
-        AvFrameUniquePtr{av_frame_alloc(), [buffer](AVFrame* ptr) mutable {
-                           if (ptr) {
-                             av_frame_free(&ptr);
-                           }
-                           if (buffer) {
-                             av_free(buffer);
-                             buffer = nullptr;
-                           }
-                         }};
+    auto raw_preallocated_frame = av_frame_alloc();
+    av_image_alloc(raw_preallocated_frame->data,
+                   raw_preallocated_frame->linesize, codec_params->width,
+                   codec_params->height, AV_PIX_FMT_RGBA, 16);
 
-    av_image_fill_arrays(pre_allocated_frame->data,
-                         pre_allocated_frame->linesize, buffer, AV_PIX_FMT_RGBA,
-                         codec_params->width, codec_params->height, 1);
+    pre_allocated_frame =
+        AvFrameUniquePtr{raw_preallocated_frame, [](AVFrame *frame) mutable {
+                           av_freep(&frame->data);
+                           av_frame_free(&frame);
+                         }};
+    pre_allocated_frame->width = codec_params->width;
+    pre_allocated_frame->height = codec_params->height;
+    pre_allocated_frame->format = codec_params->format;
   }
 
   if (sws_scale(_sws_ctx, _original_frame_cache->data,

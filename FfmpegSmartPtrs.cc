@@ -1,17 +1,10 @@
 #include "FfmpegSmartPtrs.h"
 
-AvFrameUniquePtr MakeAvFrameUnique() {
-  return AvFrameUniquePtr{av_frame_alloc(), [](AVFrame* ptr) {
-                            if (ptr) {
-                              av_frame_free(&ptr);
-                            }
-                          }};
+AvFrameUniquePtr MakeAvFrameUnique(AVFrame *frame) {
+  return AvFrameUniquePtr{frame, [](AVFrame *frame) { av_frame_free(&frame); }};
 }
 
-AvPacketUniquePtr MakeAvPacketUnique() {
-  return AvPacketUniquePtr{av_packet_alloc(), [](AVPacket* ptr) {
-                             if (ptr) {
-                               av_packet_free(&ptr);
-                             }
-                           }};
+AvPacketUniquePtr MakeAvPacketUnique(AVPacket *packet) {
+  return AvPacketUniquePtr{packet,
+                           [](AVPacket *packet) { av_packet_free(&packet); }};
 }

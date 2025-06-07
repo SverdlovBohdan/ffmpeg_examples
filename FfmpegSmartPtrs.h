@@ -9,9 +9,9 @@ extern "C" {
 }
 
 using AvFrameUniquePtr =
-    std::unique_ptr<AVFrame, std::function<void(AVFrame*)>>;
+    std::unique_ptr<AVFrame, std::function<void(AVFrame *)>>;
 using AvPacketUniquePtr =
-    std::unique_ptr<AVPacket, std::function<void(AVPacket*)>>;
+    std::unique_ptr<AVPacket, std::function<void(AVPacket *)>>;
 
-AvFrameUniquePtr MakeAvFrameUnique();
-AvPacketUniquePtr MakeAvPacketUnique();
+AvFrameUniquePtr MakeAvFrameUnique(AVFrame *frame = av_frame_alloc());
+AvPacketUniquePtr MakeAvPacketUnique(AVPacket *packet = av_packet_alloc());

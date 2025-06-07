@@ -24,9 +24,9 @@ int main() {
   // Create a sprite that will display the texture
   sf::Sprite sprite(texture);
 
-  FrameExtractorFromFile frame_extractor{std::filesystem::path{kBunnyFile}};
+  FrameExtractorFromFile frame_extractor{kBunnyFile};
 
-  AvFrameUniquePtr rgb_frame = AvFrameUniquePtr{nullptr, [](auto*) {}};
+  AvFrameUniquePtr rgb_frame = MakeAvFrameUnique(nullptr);
 
   // run the program as long as the window is open
   while (window.isOpen()) {
@@ -38,7 +38,7 @@ int main() {
         window.close();
       }
 
-      if (const auto* resized = event->getIf<sf::Event::Resized>()) {
+      if (const auto *resized = event->getIf<sf::Event::Resized>()) {
         // update the view to the new size of the window
         sf::FloatRect visibleArea({0.f, 0.f}, sf::Vector2f(resized->size));
         window.setView(sf::View(visibleArea));
@@ -48,7 +48,7 @@ int main() {
     if (frame_extractor.HasMoreVideoFrames()) {
       rgb_frame = frame_extractor.GetRgbaFrame(std::move(rgb_frame));
     } else {
-      rgb_frame.release();
+      rgb_frame.reset();
     }
 
     // clear the window with black color
@@ -56,7 +56,10 @@ int main() {
 
     // draw everything here...
     if (rgb_frame) {
-      texture.update(rgb_frame->data[0]);
+      texture.update(rgb_frame->data[0],
+                     sf::Vector2u{static_cast<unsigned int>(rgb_frame->width),
+                                  static_cast<unsigned int>(rgb_frame->height)},
+                     sf::Vector2u{0, 0});
     }
 
     window.draw(sprite);
