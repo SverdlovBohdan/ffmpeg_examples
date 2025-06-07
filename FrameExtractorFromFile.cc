@@ -23,10 +23,10 @@ FrameExtractorFromFile::~FrameExtractorFromFile() {
   avformat_close_input(&_format_ctx);
 }
 
-AvFrameUniquePtr FrameExtractorFromFile::GetOriginalFrame(
-    AvFrameUniquePtr pre_allocated_frame) {
+std::expected<AvFrameUniquePtr, GenericErrors>
+FrameExtractorFromFile::GetOriginalFrame(AvFrameUniquePtr pre_allocated_frame) {
   if (!IsReady() && !OpenCodec()) {
-    return pre_allocated_frame;
+    return std::unexpected(GenericErrors::kCodecError);
   }
 
   if (!_packet) {
@@ -60,16 +60,18 @@ AvFrameUniquePtr FrameExtractorFromFile::GetOriginalFrame(
     av_packet_unref(_packet.get());
   }
 
-  _has_more_video_frames = false;
-  return pre_allocated_frame;
+  return std::unexpected(GenericErrors::kNoMoreFrames);
 }
 
-AvFrameUniquePtr FrameExtractorFromFile::GetRgbaFrame(
-    AvFrameUniquePtr pre_allocated_frame) {
-  _original_frame_cache = GetOriginalFrame(std::move(_original_frame_cache));
-  if (!HasMoreVideoFrames()) {
-    return pre_allocated_frame;
+std::expected<AvFrameUniquePtr, GenericErrors>
+FrameExtractorFromFile::GetRgbaFrame(AvFrameUniquePtr pre_allocated_frame) {
+  auto maybe_original_frame =
+      GetOriginalFrame(std::move(_original_frame_cache));
+  if (!maybe_original_frame.has_value()) {
+    return maybe_original_frame;
   }
+
+  _original_frame_cache = *std::move(maybe_original_frame);
 
   AVCodecParameters* codec_params =
       _format_ctx->streams[_video_stream_idx]->codecpar;
@@ -88,13 +90,22 @@ AvFrameUniquePtr FrameExtractorFromFile::GetRgbaFrame(
     pre_allocated_frame->width = codec_params->width;
     pre_allocated_frame->height = codec_params->height;
     pre_allocated_frame->format = codec_params->format;
+
+    _sws_ctx = sws_getContext(codec_params->width, codec_params->height,
+                              _codec_ctx->pix_fmt, codec_params->width,
+                              codec_params->height, AV_PIX_FMT_RGBA,
+                              SWS_BILINEAR, nullptr, nullptr, nullptr);
+    if (!_sws_ctx) {
+      std::cerr << "Can not get sws context." << std::endl;
+      return std::unexpected(GenericErrors::kFrameScaleError);
+    }
   }
 
   if (sws_scale(_sws_ctx, _original_frame_cache->data,
                 _original_frame_cache->linesize, 0, codec_params->height,
                 pre_allocated_frame->data,
                 pre_allocated_frame->linesize) == 0) {
-    return pre_allocated_frame;
+    return std::unexpected(GenericErrors::kFrameScaleError);
   }
 
   return pre_allocated_frame;
@@ -157,22 +168,9 @@ bool FrameExtractorFromFile::OpenCodec() {
     return false;
   }
 
-  _sws_ctx = sws_getContext(codec_params->width, codec_params->height,
-                            _codec_ctx->pix_fmt, codec_params->width,
-                            codec_params->height, AV_PIX_FMT_RGBA, SWS_BILINEAR,
-                            nullptr, nullptr, nullptr);
-  if (!_sws_ctx) {
-    std::cerr << "Can not get sws context." << std::endl;
-    return false;
-  }
-
   return true;
 }
 
 bool FrameExtractorFromFile::IsReady() const {
-  return _format_ctx && _codec_ctx && _sws_ctx;
-}
-
-bool FrameExtractorFromFile::HasMoreVideoFrames() const {
-  return _has_more_video_frames;
+  return _format_ctx && _codec_ctx;
 }

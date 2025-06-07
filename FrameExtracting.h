@@ -1,16 +1,16 @@
 #pragma once
 
+#include "Errors.h"
 #include "FfmpegSmartPtrs.h"
+#include <expected>
 
 class FrameExtracting {
  public:
   virtual ~FrameExtracting() = default;
 
-  virtual AvFrameUniquePtr GetOriginalFrame(
-      AvFrameUniquePtr pre_allocated_frame) = 0;
+  virtual std::expected<AvFrameUniquePtr, GenericErrors>
+  GetOriginalFrame(AvFrameUniquePtr pre_allocated_frame) = 0;
 
-  virtual AvFrameUniquePtr GetRgbaFrame(
-      AvFrameUniquePtr pre_allocated_frame) = 0;
-
-  virtual bool HasMoreVideoFrames() const = 0;
+  virtual std::expected<AvFrameUniquePtr, GenericErrors>
+  GetRgbaFrame(AvFrameUniquePtr pre_allocated_frame) = 0;
 };

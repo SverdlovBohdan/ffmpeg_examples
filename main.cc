@@ -45,8 +45,9 @@ int main() {
       }
     }
 
-    if (frame_extractor.HasMoreVideoFrames()) {
-      rgb_frame = frame_extractor.GetRgbaFrame(std::move(rgb_frame));
+    auto maybe_rgba_frame = frame_extractor.GetRgbaFrame(std::move(rgb_frame));
+    if (maybe_rgba_frame.has_value()) {
+      rgb_frame = *std::move(maybe_rgba_frame);
     } else {
       rgb_frame.reset();
     }

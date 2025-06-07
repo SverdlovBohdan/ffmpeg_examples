@@ -14,14 +14,13 @@ class FrameExtractorFromFile : public FrameExtracting {
 
   ~FrameExtractorFromFile() override;
 
-  AvFrameUniquePtr GetOriginalFrame(
-      AvFrameUniquePtr pre_allocated_frame) override;
+  std::expected<AvFrameUniquePtr, GenericErrors>
+  GetOriginalFrame(AvFrameUniquePtr pre_allocated_frame) override;
 
-  AvFrameUniquePtr GetRgbaFrame(AvFrameUniquePtr pre_allocated_frame) override;
+  std::expected<AvFrameUniquePtr, GenericErrors>
+  GetRgbaFrame(AvFrameUniquePtr pre_allocated_frame) override;
 
-  bool HasMoreVideoFrames() const override;
-
- private:
+private:
   bool OpenCodec();
   bool IsReady() const;
 
