@@ -1,7 +1,8 @@
 #pragma once
 
 enum class GenericErrors {
-    kNoMoreFrames,
-    kCodecError,
-    kFrameScaleError,
+  kNoMoreFrames,
+  kCodecError,
+  kFrameScaleError,
+  kNoVideoInfo
 };

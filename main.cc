@@ -11,12 +11,29 @@ extern "C" {
 #include <libswscale/swscale.h>
 }
 
+namespace {
+constexpr unsigned int kRibbonNavigatorHeight = 100;
+}
+
 int main() {
   const std::filesystem::path kBunnyFile =
       "./resources/BigBuckBunny36010s5MB.mp4";
 
+  sf::Vector2u window_size{};
+  FrameExtractorFromFile frame_extractor{kBunnyFile};
+
+  if (auto maybe_size = frame_extractor.GetFrameSize();
+      maybe_size.has_value()) {
+    window_size = {static_cast<unsigned int>(maybe_size.value().first),
+                   static_cast<unsigned int>(maybe_size.value().second) +
+                       kRibbonNavigatorHeight};
+  } else {
+    std::cout << "Can't get frame info." << std::endl;
+    return 0;
+  }
+
   // create the window
-  sf::RenderWindow window(sf::VideoMode({800, 600}), "My window");
+  sf::RenderWindow window(sf::VideoMode(window_size), "My window");
 
   // Create an empty texture
   sf::Texture texture(sf::Vector2u{640, 360});
@@ -24,9 +41,7 @@ int main() {
   // Create a sprite that will display the texture
   sf::Sprite sprite(texture);
 
-  FrameExtractorFromFile frame_extractor{kBunnyFile};
-
-  AvFrameUniquePtr rgb_frame = MakeAvFrameUnique(nullptr);
+  auto rgb_frame = MakeAvFrameUnique(nullptr);
 
   // run the program as long as the window is open
   while (window.isOpen()) {

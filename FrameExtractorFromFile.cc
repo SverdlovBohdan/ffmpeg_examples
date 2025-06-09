@@ -1,5 +1,6 @@
 #include "FrameExtractorFromFile.h"
 
+#include <format>
 #include <iostream>
 
 extern "C" {
@@ -13,8 +14,7 @@ FrameExtractorFromFile::FrameExtractorFromFile(std::filesystem::path file)
     : _file{std::move(file)}, _format_ctx{nullptr}, _codec_ctx{nullptr},
       _sws_ctx{nullptr}, _video_stream_idx{-1},
       _packet{MakeAvPacketUnique(nullptr)},
-      _original_frame_cache{MakeAvFrameUnique(nullptr)},
-      _has_more_video_frames{true} {}
+      _original_frame_cache{MakeAvFrameUnique(nullptr)} {}
 
 FrameExtractorFromFile::~FrameExtractorFromFile() {
   avcodec_free_context(&_codec_ctx);
@@ -173,4 +173,51 @@ bool FrameExtractorFromFile::OpenCodec() {
 
 bool FrameExtractorFromFile::IsReady() const {
   return _format_ctx && _codec_ctx;
+}
+
+std::expected<RectSize, GenericErrors>
+FrameExtractorFromFile::GetFrameSize() const {
+  SetVideoStreamInfo();
+
+  if (!_frame_size_cache) {
+    return std::unexpected{GenericErrors::kNoVideoInfo};
+  }
+
+  return *_frame_size_cache;
+}
+
+std::expected<Seconds, GenericErrors>
+FrameExtractorFromFile::GetVideoStreamDuration() const {
+  SetVideoStreamInfo();
+
+  if (!_video_stream_duration) {
+    return std::unexpected{GenericErrors::kNoVideoInfo};
+  }
+
+  return *_video_stream_duration;
+}
+
+void FrameExtractorFromFile::SetVideoStreamInfo() const {
+  if (_frame_size_cache && _video_stream_duration) {
+    return;
+  }
+
+  FrameExtractorFromFile video_stream_info_extractor{_file};
+  if (auto maybe_frame = video_stream_info_extractor.GetOriginalFrame(
+          MakeAvFrameUnique(nullptr));
+      maybe_frame.has_value()) {
+    _frame_size_cache =
+        std::make_pair(static_cast<unsigned int>(maybe_frame.value()->width),
+                       static_cast<unsigned int>(maybe_frame.value()->height));
+
+    _video_stream_duration = static_cast<double>(
+        video_stream_info_extractor._format_ctx
+            ->streams[video_stream_info_extractor._video_stream_idx]
+            ->duration *
+        av_q2d(video_stream_info_extractor._format_ctx
+                   ->streams[video_stream_info_extractor._video_stream_idx]
+                   ->time_base));
+  } else {
+    std::cout << "Can't get video stream info." << std::endl;
+  }
 }

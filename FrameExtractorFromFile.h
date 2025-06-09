@@ -1,15 +1,18 @@
 #pragma once
 
 #include <filesystem>
+#include <optional>
 
 #include "FrameExtracting.h"
+#include "VideoStreamInfoProvider.h"
 
 struct AVFormatContext;
 struct AVCodecContext;
 struct SwsContext;
 
-class FrameExtractorFromFile : public FrameExtracting {
- public:
+class FrameExtractorFromFile : public FrameExtracting,
+                               public VideoStreamInfoProvider {
+public:
   explicit FrameExtractorFromFile(std::filesystem::path file);
 
   ~FrameExtractorFromFile() override;
@@ -20,9 +23,13 @@ class FrameExtractorFromFile : public FrameExtracting {
   std::expected<AvFrameUniquePtr, GenericErrors>
   GetRgbaFrame(AvFrameUniquePtr pre_allocated_frame) override;
 
+  std::expected<RectSize, GenericErrors> GetFrameSize() const override;
+  std::expected<Seconds, GenericErrors> GetVideoStreamDuration() const override;
+
 private:
   bool OpenCodec();
   bool IsReady() const;
+  void SetVideoStreamInfo() const;
 
   std::filesystem::path _file;
 
@@ -33,5 +40,7 @@ private:
 
   AvPacketUniquePtr _packet;
   AvFrameUniquePtr _original_frame_cache;
-  bool _has_more_video_frames;
+
+  mutable std::optional<RectSize> _frame_size_cache;
+  mutable std::optional<Seconds> _video_stream_duration;
 };
