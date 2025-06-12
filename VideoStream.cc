@@ -1,4 +1,4 @@
-#include "FrameExtractorFromFile.h"
+#include "VideoStream.h"
 
 #include <format>
 #include <iostream>
@@ -10,13 +10,13 @@ extern "C" {
 #include <libswscale/swscale.h>
 }
 
-FrameExtractorFromFile::FrameExtractorFromFile(std::filesystem::path file)
+VideoStream::VideoStream(std::filesystem::path file)
     : _file{std::move(file)}, _format_ctx{nullptr}, _codec_ctx{nullptr},
       _sws_ctx{nullptr}, _video_stream_idx{-1},
       _packet{MakeAvPacketUnique(nullptr)},
       _original_frame_cache{MakeAvFrameUnique(nullptr)} {}
 
-FrameExtractorFromFile::~FrameExtractorFromFile() {
+VideoStream::~VideoStream() {
   avcodec_free_context(&_codec_ctx);
   sws_freeContext(_sws_ctx);
   _sws_ctx = nullptr;
@@ -24,7 +24,7 @@ FrameExtractorFromFile::~FrameExtractorFromFile() {
 }
 
 std::expected<AvFrameUniquePtr, GenericErrors>
-FrameExtractorFromFile::GetOriginalFrame(AvFrameUniquePtr pre_allocated_frame) {
+VideoStream::GetOriginalFrame(AvFrameUniquePtr pre_allocated_frame) {
   if (!IsReady() && !OpenCodec()) {
     return std::unexpected(GenericErrors::kCodecError);
   }
@@ -33,7 +33,7 @@ FrameExtractorFromFile::GetOriginalFrame(AvFrameUniquePtr pre_allocated_frame) {
     _packet = MakeAvPacketUnique();
   }
 
-  AVCodecParameters* codec_params =
+  AVCodecParameters *codec_params =
       _format_ctx->streams[_video_stream_idx]->codecpar;
 
   if (!pre_allocated_frame) {
@@ -64,7 +64,7 @@ FrameExtractorFromFile::GetOriginalFrame(AvFrameUniquePtr pre_allocated_frame) {
 }
 
 std::expected<AvFrameUniquePtr, GenericErrors>
-FrameExtractorFromFile::GetRgbaFrame(AvFrameUniquePtr pre_allocated_frame) {
+VideoStream::GetRgbaFrame(AvFrameUniquePtr pre_allocated_frame) {
   auto maybe_original_frame =
       GetOriginalFrame(std::move(_original_frame_cache));
   if (!maybe_original_frame.has_value()) {
@@ -73,7 +73,7 @@ FrameExtractorFromFile::GetRgbaFrame(AvFrameUniquePtr pre_allocated_frame) {
 
   _original_frame_cache = *std::move(maybe_original_frame);
 
-  AVCodecParameters* codec_params =
+  AVCodecParameters *codec_params =
       _format_ctx->streams[_video_stream_idx]->codecpar;
 
   if (!pre_allocated_frame) {
@@ -111,7 +111,30 @@ FrameExtractorFromFile::GetRgbaFrame(AvFrameUniquePtr pre_allocated_frame) {
   return pre_allocated_frame;
 }
 
-bool FrameExtractorFromFile::OpenCodec() {
+std::expected<std::vector<AvFrameUniquePtr>, GenericErrors>
+VideoStream::GetRgbaFramesByTimestamps(const std::vector<Seconds> timestamps) {
+  std::vector<AvFrameUniquePtr> frames{};
+  frames.reserve(timestamps.size());
+
+  for (auto timestamp : timestamps) {
+    auto time_based_ts =
+        av_rescale_q(static_cast<int64_t>(timestamp * AV_TIME_BASE),
+                     AV_TIME_BASE_Q, _format_ctx->streams[_video_stream_idx]->time_base);
+        av_seek_frame(_format_ctx, _video_stream_idx, time_based_ts, AVSEEK_FLAG_BACKWARD);
+        avcodec_flush_buffers(_codec_ctx);
+
+        auto maybe_rgba_frame = GetRgbaFrame(MakeAvFrameUnique(nullptr));
+        if (!maybe_rgba_frame) {
+          return std::unexpected(GenericErrors::kNoMoreFrames);
+        }
+
+        frames.push_back(std::move(maybe_rgba_frame).value());
+  }
+
+  return frames;
+}
+
+bool VideoStream::OpenCodec() {
   if (avformat_open_input(&_format_ctx, _file.c_str(), nullptr, nullptr) != 0) {
     std::cerr << "Could not open file: " << _file << std::endl;
     return false;
@@ -137,9 +160,9 @@ bool FrameExtractorFromFile::OpenCodec() {
     return false;
   }
 
-  AVCodecParameters* codec_params =
+  AVCodecParameters *codec_params =
       _format_ctx->streams[_video_stream_idx]->codecpar;
-  const AVCodec* codec = avcodec_find_decoder(codec_params->codec_id);
+  const AVCodec *codec = avcodec_find_decoder(codec_params->codec_id);
   if (!codec) {
     std::cerr << "Unsupported codec!" << std::endl;
     avformat_close_input(&_format_ctx);
@@ -171,12 +194,9 @@ bool FrameExtractorFromFile::OpenCodec() {
   return true;
 }
 
-bool FrameExtractorFromFile::IsReady() const {
-  return _format_ctx && _codec_ctx;
-}
+bool VideoStream::IsReady() const { return _format_ctx && _codec_ctx; }
 
-std::expected<RectSize, GenericErrors>
-FrameExtractorFromFile::GetFrameSize() const {
+std::expected<RectSize, GenericErrors> VideoStream::GetFrameSize() {
   SetVideoStreamInfo();
 
   if (!_frame_size_cache) {
@@ -186,8 +206,7 @@ FrameExtractorFromFile::GetFrameSize() const {
   return *_frame_size_cache;
 }
 
-std::expected<Seconds, GenericErrors>
-FrameExtractorFromFile::GetVideoStreamDuration() const {
+std::expected<Seconds, GenericErrors> VideoStream::GetVideoStreamDuration() {
   SetVideoStreamInfo();
 
   if (!_video_stream_duration) {
@@ -197,27 +216,23 @@ FrameExtractorFromFile::GetVideoStreamDuration() const {
   return *_video_stream_duration;
 }
 
-void FrameExtractorFromFile::SetVideoStreamInfo() const {
+void VideoStream::SetVideoStreamInfo() {
   if (_frame_size_cache && _video_stream_duration) {
     return;
   }
 
-  FrameExtractorFromFile video_stream_info_extractor{_file};
-  if (auto maybe_frame = video_stream_info_extractor.GetOriginalFrame(
-          MakeAvFrameUnique(nullptr));
-      maybe_frame.has_value()) {
-    _frame_size_cache =
-        std::make_pair(static_cast<unsigned int>(maybe_frame.value()->width),
-                       static_cast<unsigned int>(maybe_frame.value()->height));
-
-    _video_stream_duration = static_cast<double>(
-        video_stream_info_extractor._format_ctx
-            ->streams[video_stream_info_extractor._video_stream_idx]
-            ->duration *
-        av_q2d(video_stream_info_extractor._format_ctx
-                   ->streams[video_stream_info_extractor._video_stream_idx]
-                   ->time_base));
-  } else {
+  if (!IsReady() && !OpenCodec()) {
     std::cout << "Can't get video stream info." << std::endl;
+    return;
   }
+
+  _frame_size_cache = std::make_pair(
+      static_cast<unsigned int>(
+          _format_ctx->streams[_video_stream_idx]->codecpar->width),
+      static_cast<unsigned int>(
+          _format_ctx->streams[_video_stream_idx]->codecpar->height));
+
+  _video_stream_duration = static_cast<double>(
+      _format_ctx->streams[_video_stream_idx]->duration *
+      av_q2d(_format_ctx->streams[_video_stream_idx]->time_base));
 }

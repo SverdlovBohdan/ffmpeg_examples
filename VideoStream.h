@@ -10,12 +10,11 @@ struct AVFormatContext;
 struct AVCodecContext;
 struct SwsContext;
 
-class FrameExtractorFromFile : public FrameExtracting,
-                               public VideoStreamInfoProvider {
+class VideoStream : public FrameExtracting, public VideoStreamInfoProvider {
 public:
-  explicit FrameExtractorFromFile(std::filesystem::path file);
+  explicit VideoStream(std::filesystem::path file);
 
-  ~FrameExtractorFromFile() override;
+  ~VideoStream() override;
 
   std::expected<AvFrameUniquePtr, GenericErrors>
   GetOriginalFrame(AvFrameUniquePtr pre_allocated_frame) override;
@@ -23,13 +22,16 @@ public:
   std::expected<AvFrameUniquePtr, GenericErrors>
   GetRgbaFrame(AvFrameUniquePtr pre_allocated_frame) override;
 
-  std::expected<RectSize, GenericErrors> GetFrameSize() const override;
-  std::expected<Seconds, GenericErrors> GetVideoStreamDuration() const override;
+  std::expected<std::vector<AvFrameUniquePtr>, GenericErrors>
+  GetRgbaFramesByTimestamps(const std::vector<Seconds> timestamps) override;
+
+  std::expected<RectSize, GenericErrors> GetFrameSize() override;
+  std::expected<Seconds, GenericErrors> GetVideoStreamDuration() override;
 
 private:
   bool OpenCodec();
   bool IsReady() const;
-  void SetVideoStreamInfo() const;
+  void SetVideoStreamInfo();
 
   std::filesystem::path _file;
 

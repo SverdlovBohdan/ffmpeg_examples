@@ -8,6 +8,6 @@ class VideoStreamInfoProvider {
     public:
     virtual ~VideoStreamInfoProvider() = default;
 
-    virtual std::expected<RectSize, GenericErrors> GetFrameSize() const = 0;
-    virtual std::expected<Seconds, GenericErrors> GetVideoStreamDuration() const = 0;
+    virtual std::expected<RectSize, GenericErrors> GetFrameSize() = 0;
+    virtual std::expected<Seconds, GenericErrors> GetVideoStreamDuration() = 0;
 };
